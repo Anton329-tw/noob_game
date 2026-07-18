@@ -2,6 +2,7 @@
 
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
+window.ctx = ctx;
 
 // DOM UI Elements
 const startScreen = document.getElementById('startScreen');
@@ -194,6 +195,7 @@ const player = {
   dashActiveTimer: 0,
   dashDirection: 1
 };
+window.player = player;
 
 // Pirates Array
 let pirates = [];
