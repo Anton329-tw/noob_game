@@ -14,6 +14,9 @@ const killsCount = document.getElementById('killsCount');
 const finalKills = document.getElementById('finalKills');
 const finalTime = document.getElementById('finalTime');
 const damageOverlay = document.getElementById('damageOverlay');
+const openingAnimationScreen = document.getElementById('openingAnimationScreen');
+const animationCanvas = document.getElementById('animationCanvas');
+const skipAnimBtn = document.getElementById('skipAnimBtn');
 
 // Key bindings indicators in HUD
 const keyW = document.getElementById('hudKeyW');
@@ -72,6 +75,7 @@ const CANVAS_HEIGHT = 576;
 
 // Game State Variables
 let gameState = 'start'; // 'start', 'playing', 'gameover'
+let openingAnimationId = null; // [NEW]
 let score = 0;
 let startTime = 0;
 let gameTime = 0;
@@ -628,8 +632,11 @@ class Pirate {
     }
   }
 
-  draw() {
+  draw(ctx = window.ctx) {
     ctx.save();
+
+    // Support custom chapter override
+    const chapter = this.chapterOverride !== undefined ? this.chapterOverride : window.chapter;
 
     // Flash white/red when hit
     if (this.hitFlashFrames > 0) {
@@ -1480,10 +1487,572 @@ function startGame(isRetry = false) {
     chapterNumber.innerText = isRetry ? chapter.toString() : '1';
   }
   
-  gameState = 'playing';
-  startScreen.classList.add('hidden');
-  gameOverScreen.classList.add('hidden');
-  resetGame(isRetry);
+  if (isRetry) {
+    gameState = 'playing';
+    startScreen.classList.add('hidden');
+    gameOverScreen.classList.add('hidden');
+    resetGame(isRetry);
+  } else {
+    // Show opening animation screen!
+    startScreen.classList.add('hidden');
+    startOpeningAnimation();
+  }
+}
+
+// Full-screen Opening Animation [NEW]
+function startOpeningAnimation() {
+  openingAnimationScreen.classList.remove('hidden');
+  
+  const animCanvas = document.getElementById('animationCanvas');
+  const animCtx = animCanvas.getContext('2d');
+  
+  // Set dimensions to match gameCanvas
+  animCanvas.width = CANVAS_WIDTH;
+  animCanvas.height = CANVAS_HEIGHT;
+  
+  // Animation variables
+  let animFrame = 0;
+  const maxAnimFrames = 540; // 9 seconds
+  
+  let animShakeIntensity = 0;
+  const animParticles = [];
+  const animProjectiles = [];
+  const animTextPopups = [];
+  const animMists = [];
+  
+  // Custom helper to spawn particles
+  function spawnParticle(x, y, vx, vy, color, size, life, type = 'spark') {
+    animParticles.push({ x, y, vx, vy, color, size, life, maxLife: life, type });
+  }
+
+  // Custom helper to spawn text popups
+  function spawnText(x, y, text, color) {
+    animTextPopups.push({ x, y, text, color, life: 45, maxLife: 45 });
+  }
+
+  // 7 heroes configuration
+  const heroes = [
+    { character: 'xiaobing', x: -100, y: GROUND_Y - 54, width: 32, height: 54, targetX: 120, vx: 2.2, vy: 0, isGrounded: true, facing: 1, isAttacking: false, attackTime: 0, attackDuration: 12, hp: 80, maxHp: 80 },
+    { character: 'anton', x: -160, y: GROUND_Y - 54, width: 32, height: 54, targetX: 200, vx: 2.2, vy: 0, isGrounded: true, facing: 1, isAttacking: false, attackTime: 0, attackDuration: 10, hp: 60, maxHp: 60 },
+    { character: 'zhongtu', x: -220, y: GROUND_Y - 54, width: 32, height: 54, targetX: 280, vx: 2.4, vy: 0, isGrounded: true, facing: 1, isAttacking: false, attackTime: 0, attackDuration: 12, hp: 100, maxHp: 100 },
+    { character: 'bge', x: -280, y: GROUND_Y - 54, width: 32, height: 54, targetX: 360, vx: 2.4, vy: 0, isGrounded: true, facing: 1, isAttacking: false, attackTime: 0, attackDuration: 12, hp: 100, maxHp: 100 },
+    { character: 'noob', x: -340, y: GROUND_Y - 54, width: 32, height: 54, targetX: 440, vx: 2.6, vy: 0, isGrounded: true, facing: 1, isAttacking: false, attackTime: 0, attackDuration: 12, hp: 80, maxHp: 80, jumpForce: -14 },
+    { character: 'laige', x: -400, y: GROUND_Y - 54, width: 32, height: 54, targetX: 520, vx: 2.6, vy: 0, isGrounded: true, facing: 1, isAttacking: false, attackTime: 0, attackDuration: 12, hp: 200, maxHp: 200, attackRange: 105 },
+    { character: 'amber', x: -460, y: GROUND_Y - 54, width: 32, height: 54, targetX: 600, vx: 2.6, vy: 0, isGrounded: true, facing: 1, isAttacking: false, attackTime: 0, attackDuration: 12, hp: 100, maxHp: 100, attackRange: 115 }
+  ];
+
+  // Pirates list (drawn with their custom chapters)
+  const pirates = [
+    { id: 1, x: 1100, y: GROUND_Y - 54, width: 34, height: 54, isBoss: false, isStageBoss: false, hp: 60, maxHp: 60, facing: -1, vx: -2.2, speed: 2.2, isAttacking: false, attackTime: 0, attackDuration: 12, attackRange: 42, attackCooldown: 0, attackMaxCooldown: 60, chapterOverride: 1, hitFlashFrames: 0, poisonDuration: 0, freezeDuration: 0 },
+    { id: 2, x: 1180, y: GROUND_Y - 54, width: 34, height: 54, isBoss: false, isStageBoss: false, hp: 60, maxHp: 60, facing: -1, vx: -2.2, speed: 2.2, isAttacking: false, attackTime: 0, attackDuration: 12, attackRange: 42, attackCooldown: 0, attackMaxCooldown: 60, chapterOverride: 2, hitFlashFrames: 0, poisonDuration: 0, freezeDuration: 0 },
+    { id: 3, x: 1260, y: GROUND_Y - 54, width: 34, height: 54, isBoss: false, isStageBoss: false, hp: 70, maxHp: 70, facing: -1, vx: -2.0, speed: 2.0, isAttacking: false, attackTime: 0, attackDuration: 12, attackRange: 42, attackCooldown: 0, attackMaxCooldown: 60, chapterOverride: 3, hitFlashFrames: 0, poisonDuration: 0, freezeDuration: 0 },
+    { id: 4, x: 1340, y: GROUND_Y - 54, width: 34, height: 54, isBoss: false, isStageBoss: false, hp: 70, maxHp: 70, facing: -1, vx: -2.4, speed: 2.4, isAttacking: false, attackTime: 0, attackDuration: 12, attackRange: 42, attackCooldown: 0, attackMaxCooldown: 60, chapterOverride: 4, hitFlashFrames: 0, poisonDuration: 0, freezeDuration: 0 },
+    { id: 5, x: 1420, y: GROUND_Y - 54, width: 34, height: 54, isBoss: false, isStageBoss: false, hp: 80, maxHp: 80, facing: -1, vx: -1.8, speed: 1.8, isAttacking: false, attackTime: 0, attackDuration: 12, attackRange: 42, attackCooldown: 0, attackMaxCooldown: 60, chapterOverride: 5, hitFlashFrames: 0, poisonDuration: 0, freezeDuration: 0 },
+    { id: 6, x: 1500, y: GROUND_Y - 54, width: 34, height: 54, isBoss: false, isStageBoss: false, hp: 60, maxHp: 60, facing: -1, vx: -1.5, speed: 1.5, isAttacking: false, attackTime: 0, attackDuration: 12, attackRange: 320, attackCooldown: 0, attackMaxCooldown: 120, isRanged: true, chapterOverride: 3, hitFlashFrames: 0, poisonDuration: 0, freezeDuration: 0 },
+    { id: 7, x: 1650, y: GROUND_Y - 92, width: 58, height: 92, isBoss: false, isStageBoss: true, hp: 350, maxHp: 350, facing: -1, vx: -1.2, speed: 1.2, isAttacking: false, attackTime: 0, attackDuration: 12, attackRange: 70, attackCooldown: 0, attackMaxCooldown: 60, chapterOverride: 4, hitFlashFrames: 0, poisonDuration: 0, freezeDuration: 0 }
+  ];
+
+  // Bind custom draw method to animPirates
+  pirates.forEach(p => {
+    p.draw = Pirate.prototype.draw;
+  });
+
+  // Skip button handler
+  skipAnimBtn.onclick = () => {
+    endOpeningAnimation();
+  };
+
+  function endOpeningAnimation() {
+    cancelAnimationFrame(openingAnimationId);
+    openingAnimationScreen.classList.add('hidden');
+    
+    // Begin the actual game play
+    gameState = 'playing';
+    resetGame(false);
+  }
+
+  function drawAnimBackground() {
+    // Cinematic background
+    const skyGrad = animCtx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
+    skyGrad.addColorStop(0, '#020208');
+    skyGrad.addColorStop(0.6, '#0f1026');
+    skyGrad.addColorStop(1, '#201633');
+    animCtx.fillStyle = skyGrad;
+    animCtx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    // lightning flashes
+    if (animFrame > 60 && animFrame % 140 < 5) {
+      animCtx.fillStyle = `rgba(255, 255, 255, ${0.4 - (animFrame % 140) * 0.08})`;
+      animCtx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      
+      if (animFrame % 140 === 0) {
+        animCtx.strokeStyle = '#fff';
+        animCtx.lineWidth = 3;
+        animCtx.shadowBlur = 20;
+        animCtx.shadowColor = '#fff';
+        animCtx.beginPath();
+        animCtx.moveTo(400 + Math.random()*200, 0);
+        animCtx.lineTo(350 + Math.random()*200, 150);
+        animCtx.lineTo(420 + Math.random()*200, 250);
+        animCtx.lineTo(380 + Math.random()*200, 480);
+        animCtx.stroke();
+        animCtx.restore();
+        animShakeIntensity = 10;
+      }
+    }
+
+    // waves in back
+    animCtx.fillStyle = '#080914';
+    animCtx.beginPath();
+    for (let i = 0; i <= CANVAS_WIDTH; i += 50) {
+      const waveY = GROUND_Y - 45 + Math.sin((animFrame + i) * 0.03) * 6;
+      if (i === 0) animCtx.moveTo(i, waveY);
+      else animCtx.lineTo(i, waveY);
+    }
+    animCtx.lineTo(CANVAS_WIDTH, CANVAS_HEIGHT);
+    animCtx.lineTo(0, CANVAS_HEIGHT);
+    animCtx.closePath();
+    animCtx.fill();
+
+    // ground pathway
+    animCtx.fillStyle = '#11131a';
+    animCtx.fillRect(0, GROUND_Y, CANVAS_WIDTH, CANVAS_HEIGHT - GROUND_Y);
+    animCtx.strokeStyle = 'rgba(0, 180, 216, 0.25)';
+    animCtx.lineWidth = 3;
+    animCtx.beginPath();
+    animCtx.moveTo(0, GROUND_Y);
+    animCtx.lineTo(CANVAS_WIDTH, GROUND_Y);
+    animCtx.stroke();
+  }
+
+  function loopOpeningAnimation() {
+    animFrame++;
+    
+    animCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    
+    animCtx.save();
+    if (animShakeIntensity > 0.1) {
+      const dx = (Math.random() - 0.5) * animShakeIntensity;
+      const dy = (Math.random() - 0.5) * animShakeIntensity;
+      animCtx.translate(dx, dy);
+      animShakeIntensity *= 0.9;
+    }
+    
+    drawAnimBackground();
+    
+    // Ambient rain particles
+    if (Math.random() < 0.8) {
+      spawnParticle(Math.random() * CANVAS_WIDTH, 0, (Math.random() - 0.5)*2 + 1, 8 + Math.random()*4, 'rgba(174, 217, 224, 0.15)', 1, 45, 'spark');
+    }
+
+    // --- HEROES LOGIC ---
+    heroes.forEach(h => {
+      if (animFrame < 100) {
+        if (h.x < h.targetX) {
+          h.x += h.vx;
+          h.vx = 2.5;
+        } else {
+          h.vx = 0;
+        }
+      } else if (animFrame >= 460) {
+        h.vx = 4.5;
+        h.x += h.vx;
+        h.facing = 1;
+      } else {
+        h.vx = 0;
+        h.facing = 1;
+        
+        if (!h.isAttacking) {
+          let shouldAttack = false;
+          if (h.character === 'anton' && animFrame % 45 === 0) shouldAttack = true;
+          if (h.character === 'xiaobing' && animFrame % 65 === 0) shouldAttack = true;
+          if (h.character === 'laige' && animFrame % 60 === 0) shouldAttack = true;
+          if (h.character === 'zhongtu' && animFrame % 80 === 0) shouldAttack = true;
+          if (h.character === 'bge' && animFrame % 75 === 0) shouldAttack = true;
+          if (h.character === 'amber' && animFrame % 70 === 0) shouldAttack = true;
+          
+          if (h.character === 'noob') {
+            if (animFrame === 170) {
+              h.vy = h.jumpForce;
+              h.isGrounded = false;
+              spawnText(h.x + 16, h.y - 20, '哈！', '#ffd166');
+            }
+          }
+
+          if (shouldAttack && pirates.some(p => p.hp > 0 && p.x < 1024)) {
+            h.isAttacking = true;
+            h.attackTime = 0;
+          }
+        } else {
+          h.attackTime++;
+          if (h.attackTime === Math.floor(h.attackDuration / 2)) {
+            const pCenterX = h.x + h.width/2;
+            const pCenterY = h.y + h.height/2;
+            
+            if (h.character === 'anton') {
+              animProjectiles.push({ x: pCenterX, y: pCenterY, vx: 10, vy: 0, radius: 4, color: '#ff4d6d', type: 'laser', damage: 15, life: 100 });
+              spawnParticle(pCenterX + 10, pCenterY, 3, 0, '#ff4d6d', 4, 15, 'spark');
+            } else if (h.character === 'xiaobing') {
+              animProjectiles.push({ x: pCenterX, y: pCenterY, vx: 9, vy: 0, radius: 5, color: '#90e0ef', type: 'icicle', damage: 10, life: 100 });
+              spawnParticle(pCenterX + 10, pCenterY, 2, 0, '#90e0ef', 4, 15, 'spark');
+            } else if (h.character === 'zhongtu') {
+              animProjectiles.push({ x: pCenterX, y: pCenterY, vx: 5, vy: -3, radius: 8, color: '#cbd5e1', type: 'rock', damage: 25, life: 120 });
+            } else if (h.character === 'laige') {
+              animProjectiles.push({ x: pCenterX, y: pCenterY, vx: 7.5, vy: 0, radius: 24, color: 'rgba(74, 214, 109, 0.45)', type: 'wind', damage: 25, life: 60 });
+              animShakeIntensity = 3;
+            } else if (h.character === 'bge') {
+              animMists.push({ x: pCenterX + 40, y: GROUND_Y - 20, radius: 10, maxRadius: 50, life: 120, damage: 10 });
+              for (let i=0; i<8; i++) {
+                spawnParticle(pCenterX + 20, pCenterY + (Math.random()-0.5)*20, 2 + Math.random()*2, (Math.random()-0.5)*2, '#06d6a0', 3 + Math.random()*4, 30, 'spark');
+              }
+            } else if (h.character === 'amber') {
+              const target = pirates.find(p => p.hp > 0 && p.x < 1000);
+              if (target) {
+                animProjectiles.push({ x: pCenterX, y: pCenterY, vx: 12, vy: 0, radius: 6, color: '#b5179e', type: 'hook', state: 'extend', targetPirate: target, damage: 20, life: 60 });
+              }
+            }
+          }
+          if (h.attackTime >= h.attackDuration) {
+            h.isAttacking = false;
+          }
+        }
+      }
+
+      // NooB Jump Physics Mock
+      if (h.character === 'noob' && !h.isGrounded) {
+        h.vy += 0.55;
+        h.y += h.vy;
+        if (h.y >= GROUND_Y - h.height) {
+          h.y = GROUND_Y - h.height;
+          h.vy = 0;
+          h.isGrounded = true;
+          animShakeIntensity = 12;
+          spawnText(h.x + 16, h.y - 45, '大地粉碎！💥', '#ef476f');
+          for (let i = 0; i < 20; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const spd = 2 + Math.random()*8;
+            spawnParticle(h.x + 16, GROUND_Y, Math.cos(angle)*spd, Math.sin(angle)*spd - 2, '#94a3b8', 3 + Math.random()*5, 40, 'spark');
+          }
+          pirates.forEach(p => {
+            if (p.hp > 0 && Math.abs(p.x - h.x) < 350) {
+              p.hp -= 80;
+              p.hitFlashFrames = 10;
+              p.vx = (p.x > h.x ? 1 : -1) * 6;
+              p.vy = -4;
+              spawnText(p.x + p.width/2, p.y - 20, `-80 💥`, '#94a3b8');
+            }
+          });
+        }
+      }
+
+      drawPlayer(animCtx, h);
+    });
+
+    // --- PIRATES LOGIC ---
+    pirates.forEach(p => {
+      if (p.hp <= 0) return;
+
+      if (p.poisonDuration > 0) p.poisonDuration--;
+      if (p.freezeDuration > 0) p.freezeDuration--;
+      if (p.hitFlashFrames > 0) p.hitFlashFrames--;
+
+      if (animFrame < 100) {
+        p.x += p.vx;
+      } else {
+        let actualSpeed = p.speed;
+        if (p.freezeDuration > 0) {
+          actualSpeed *= 0.5;
+        }
+        
+        const closestHero = heroes[heroes.length - 1];
+        const distToHero = p.x - (closestHero.x + closestHero.width);
+        
+        if (distToHero > p.attackRange) {
+          p.x -= actualSpeed;
+          p.vx = -actualSpeed;
+          p.facing = -1;
+        } else {
+          p.vx = 0;
+          if (p.attackCooldown > 0) p.attackCooldown--;
+          else {
+            p.isAttacking = true;
+            p.attackTime = 0;
+            p.attackCooldown = p.attackMaxCooldown;
+          }
+        }
+      }
+
+      if (p.isAttacking) {
+        p.attackTime++;
+        if (p.attackTime === Math.floor(p.attackDuration / 2)) {
+          if (p.isRanged) {
+            animProjectiles.push({
+              x: p.x, y: p.y + 12, vx: -6, vy: 0, radius: 4, color: '#ffd166', type: 'laser_enemy', damage: 5, life: 100
+            });
+          }
+        }
+        if (p.attackTime >= p.attackDuration) {
+          p.isAttacking = false;
+        }
+      }
+
+      if (Math.abs(p.vx) > p.speed) {
+        p.x += p.vx;
+        p.vx *= 0.9;
+      }
+      if (p.y < GROUND_Y - p.height) {
+        p.y += 0.5;
+        if (p.y >= GROUND_Y - p.height) {
+          p.y = GROUND_Y - p.height;
+        }
+      }
+
+      p.draw(animCtx);
+    });
+
+    // --- PROJECTILES LOGIC ---
+    for (let i = animProjectiles.length - 1; i >= 0; i--) {
+      const proj = animProjectiles[i];
+      proj.life--;
+      
+      if (proj.type === 'rock') {
+        proj.vy += 0.2;
+        proj.y += proj.vy;
+        proj.x += proj.vx;
+        if (proj.y >= GROUND_Y - proj.radius) {
+          proj.y = GROUND_Y - proj.radius;
+          proj.vy = -proj.vy * 0.6;
+        }
+      } else if (proj.type === 'hook') {
+        if (proj.state === 'extend') {
+          const dx = proj.targetPirate.x - proj.x;
+          proj.x += Math.min(Math.abs(proj.vx), Math.abs(dx)) * Math.sign(proj.vx);
+          if (Math.abs(proj.x - proj.targetPirate.x) < 20) {
+            proj.state = 'retract';
+            proj.targetPirate.hp -= proj.damage;
+            proj.targetPirate.hitFlashFrames = 10;
+            proj.targetPirate.poisonDuration = 240;
+            proj.targetPirate.vx = 8;
+            proj.targetPirate.vy = -3;
+            spawnText(proj.targetPirate.x, proj.targetPirate.y - 15, `🪝 -${proj.damage} 中毒!`, '#b5179e');
+            animShakeIntensity = 4;
+            
+            for (let j=0; j<8; j++) {
+              spawnParticle(proj.targetPirate.x, proj.targetPirate.y, (Math.random()-0.5)*4, (Math.random()-0.5)*4 - 1, '#06d6a0', 3, 20);
+            }
+          }
+        } else {
+          const hero = heroes.find(h => h.character === 'amber');
+          const dx = (hero.x + 16) - proj.x;
+          proj.x += dx * 0.2;
+          if (Math.abs(proj.x - (hero.x + 16)) < 15) {
+            proj.life = 0;
+          }
+        }
+      } else {
+        proj.x += proj.vx;
+        proj.y += proj.vy;
+      }
+
+      if (proj.type !== 'laser_enemy' && proj.type !== 'hook') {
+        pirates.forEach(p => {
+          if (p.hp <= 0) return;
+          const pDx = (p.x + p.width/2) - proj.x;
+          const pDy = (p.y + p.height/2) - proj.y;
+          const dist = Math.sqrt(pDx*pDx + pDy*pDy);
+          
+          if (dist < Math.max(p.width, p.height)/2 + proj.radius) {
+            p.hp -= proj.damage;
+            p.hitFlashFrames = 10;
+            
+            if (proj.type === 'icicle') {
+              p.freezeDuration = 240;
+              spawnText(p.x + p.width/2, p.y - 15, `❄️ -${proj.damage}`, '#90e0ef');
+              for (let j=0; j<10; j++) {
+                spawnParticle(proj.x, proj.y, (Math.random()-0.5)*4, (Math.random()-0.5)*4 - 1, '#caf0f8', 2 + Math.random()*2, 20);
+              }
+            } else if (proj.type === 'wind') {
+              p.vx = 4.5;
+              p.vy = -1.5;
+              spawnText(p.x + p.width/2, p.y - 15, `🍃 -${proj.damage}`, '#4ad66d');
+            } else {
+              p.vx = 1.5;
+              spawnText(p.x + p.width/2, p.y - 15, `-${proj.damage}`, proj.color);
+            }
+
+            for (let j=0; j<6; j++) {
+              spawnParticle(proj.x, proj.y, (Math.random()-0.5)*5, (Math.random()-0.5)*5, proj.color, 2.5, 15);
+            }
+
+            proj.life = 0;
+          }
+        });
+      }
+
+      animCtx.save();
+      animCtx.fillStyle = proj.color;
+      animCtx.shadowBlur = 10;
+      animCtx.shadowColor = proj.color;
+      animCtx.beginPath();
+      if (proj.type === 'wind') {
+        animCtx.arc(proj.x, proj.y, proj.radius, -Math.PI/3, Math.PI/3);
+        animCtx.lineWidth = 4;
+        animCtx.strokeStyle = proj.color;
+        animCtx.stroke();
+      } else if (proj.type === 'hook') {
+        const hero = heroes.find(h => h.character === 'amber');
+        animCtx.strokeStyle = 'rgba(114, 9, 183, 0.6)';
+        animCtx.lineWidth = 2;
+        animCtx.beginPath();
+        animCtx.moveTo(hero.x + 16, hero.y + 20);
+        animCtx.lineTo(proj.x, proj.y);
+        animCtx.stroke();
+        
+        animCtx.fillStyle = '#b5179e';
+        animCtx.arc(proj.x, proj.y, proj.radius, 0, Math.PI*2);
+        animCtx.fill();
+      } else {
+        animCtx.arc(proj.x, proj.y, proj.radius, 0, Math.PI*2);
+        animCtx.fill();
+      }
+      animCtx.restore();
+    }
+    
+    for (let i = animProjectiles.length - 1; i >= 0; i--) {
+      if (animProjectiles[i].life <= 0) animProjectiles.splice(i, 1);
+    }
+
+    // --- POISON MISTS LOGIC ---
+    animMists.forEach(mist => {
+      mist.life--;
+      if (mist.radius < mist.maxRadius) {
+        mist.radius += 1.5;
+      }
+      
+      if (animFrame % 15 === 0) {
+        pirates.forEach(p => {
+          if (p.hp <= 0) return;
+          const dx = (p.x + p.width/2) - mist.x;
+          const dy = (p.y + p.height/2) - mist.y;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          if (dist < mist.radius) {
+            p.hp -= 5;
+            p.hitFlashFrames = 6;
+            spawnText(p.x + p.width/2, p.y - 15, `毒 -5`, '#06d6a0');
+            spawnParticle(p.x + p.width/2, p.y + p.height/2, (Math.random()-0.5)*3, -1, '#06d6a0', 3, 20);
+          }
+        });
+      }
+
+      animCtx.save();
+      animCtx.fillStyle = 'rgba(6, 214, 160, 0.12)';
+      animCtx.strokeStyle = 'rgba(6, 214, 160, 0.35)';
+      animCtx.lineWidth = 1.5;
+      animCtx.beginPath();
+      animCtx.arc(mist.x, mist.y, mist.radius, 0, Math.PI*2);
+      animCtx.fill();
+      animCtx.stroke();
+      animCtx.restore();
+    });
+    for (let i = animMists.length - 1; i >= 0; i--) {
+      if (animMists[i].life <= 0) animMists.splice(i, 1);
+    }
+
+    // --- PARTICLES LOGIC ---
+    animParticles.forEach(p => {
+      p.life--;
+      p.x += p.vx;
+      p.y += p.vy;
+      
+      animCtx.save();
+      animCtx.fillStyle = p.color;
+      animCtx.beginPath();
+      animCtx.arc(p.x, p.y, p.size * (p.life / p.maxLife), 0, Math.PI*2);
+      animCtx.fill();
+      animCtx.restore();
+    });
+    for (let i = animParticles.length - 1; i >= 0; i--) {
+      if (animParticles[i].life <= 0) animParticles.splice(i, 1);
+    }
+
+    // --- TEXT POPUPS LOGIC ---
+    animTextPopups.forEach(p => {
+      p.life--;
+      p.y -= 0.6;
+      
+      animCtx.save();
+      animCtx.fillStyle = p.color;
+      animCtx.font = 'bold 12px "Outfit", Arial, sans-serif';
+      animCtx.textAlign = 'center';
+      animCtx.fillText(p.text, p.x, p.y);
+      animCtx.restore();
+    });
+    for (let i = animTextPopups.length - 1; i >= 0; i--) {
+      if (animTextPopups[i].life <= 0) animTextPopups.splice(i, 1);
+    }
+
+    // Clean up dead pirates
+    pirates.forEach(p => {
+      if (p.hp <= 0 && p.active !== false) {
+        p.active = false;
+        spawnText(p.x + p.width/2, p.y - 30, '擊殺! 💀', '#ff9f1c');
+        for (let i=0; i<15; i++) {
+          const ang = Math.random()*Math.PI*2;
+          const sp = 1 + Math.random()*4;
+          spawnParticle(p.x + p.width/2, p.y + p.height/2, Math.cos(ang)*sp, Math.sin(ang)*sp - 0.5, 'rgba(255,255,255,0.45)', 3, 30);
+        }
+      }
+    });
+
+    // --- CINEMATIC TEXTS ---
+    animCtx.save();
+    animCtx.textAlign = 'center';
+    animCtx.shadowBlur = 10;
+    
+    if (animFrame < 120) {
+      animCtx.fillStyle = '#ffd166';
+      animCtx.shadowColor = '#ffd166';
+      animCtx.font = '800 24px "Outfit", Arial, sans-serif';
+      animCtx.fillText('⚠️ 海 盜 聯 軍 大 舉 突 襲 ！ ⚠️', CANVAS_WIDTH / 2, 80);
+      
+      animCtx.fillStyle = '#fff';
+      animCtx.shadowColor = '#fff';
+      animCtx.font = 'bold 16px "Outfit", Arial, sans-serif';
+      animCtx.fillText('七位英雄在此集結，共同守護村莊！', CANVAS_WIDTH / 2, 120);
+    } else if (animFrame >= 120 && animFrame < 440) {
+      animCtx.fillStyle = '#ef476f';
+      animCtx.shadowColor = '#ef476f';
+      animCtx.font = '800 28px "Outfit", Arial, sans-serif';
+      animCtx.fillText('⚔️ 激烈開戰！擊退海盜！ ⚔️', CANVAS_WIDTH / 2, 80);
+    } else {
+      animCtx.fillStyle = '#4ad66d';
+      animCtx.shadowColor = '#4ad66d';
+      animCtx.font = '800 28px "Outfit", Arial, sans-serif';
+      animCtx.fillText('🎉 擊退海盜聯軍！ 🎉', CANVAS_WIDTH / 2, 80);
+      
+      animCtx.fillStyle = '#fff';
+      animCtx.shadowColor = '#fff';
+      animCtx.font = 'bold 18px "Outfit", Arial, sans-serif';
+      animCtx.fillText('保護村莊的戰鬥，正式揭開序幕！', CANVAS_WIDTH / 2, 125);
+    }
+    
+    if (animFrame > maxAnimFrames - 60) {
+      const alpha = (animFrame - (maxAnimFrames - 60)) / 60;
+      animCtx.fillStyle = `rgba(0, 0, 0, ${alpha})`;
+      animCtx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    }
+    animCtx.restore();
+
+    animCtx.restore();
+
+    if (animFrame < maxAnimFrames) {
+      openingAnimationId = requestAnimationFrame(loopOpeningAnimation);
+    } else {
+      endOpeningAnimation();
+    }
+  }
+
+  openingAnimationId = requestAnimationFrame(loopOpeningAnimation);
 }
 
 function endGame() {
@@ -2372,7 +2941,7 @@ function updatePlayer() {
 
 // Rendering Logic
 
-function drawPlayer() {
+function drawPlayer(ctx = window.ctx, player = window.player) {
   ctx.save();
 
   // Invincibility frame blinking effect
